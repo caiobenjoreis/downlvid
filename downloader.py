@@ -326,14 +326,15 @@ def _download_from_direct_url(video_url: str, platform: str) -> str:
         raise DownloadError(f"Erro ao baixar do URL direto: {str(e)}")
 
 
-def get_tiktok_trending(limit: int = 15, days: int = 5) -> list:
+def get_tiktok_trending(limit: int = 15, days: int = 5, region: str = 'US') -> list:
     """
-    Fetches trending TikTok videos from Brazil.
+    Fetches trending TikTok videos.
     Filters by last N days and returns top N videos.
     
     Args:
         limit: Number of videos to return
         days: How many days back to look
+        region: Region code (e.g. 'BR', 'US'). Defaults to 'US' (Global/International).
         
     Returns:
         list: List of dictionaries with video info
@@ -342,7 +343,7 @@ def get_tiktok_trending(limit: int = 15, days: int = 5) -> list:
     import time
     from datetime import datetime, timedelta
     
-    logger.info(f"Fetching trending TikTok videos (limit={limit}, days={days})")
+    logger.info(f"Fetching trending TikTok videos (limit={limit}, days={days}, region={region})")
     
     try:
         # TikWM Feed API
@@ -355,7 +356,7 @@ def get_tiktok_trending(limit: int = 15, days: int = 5) -> list:
         
         # Request more than limit to allow for filtering
         params = {
-            'region': 'BR',
+            'region': region,
             'count': 30  
         }
         

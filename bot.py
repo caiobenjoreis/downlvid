@@ -42,18 +42,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def viral(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Sends a list of trending TikTok videos."""
-    status_msg = await update.message.reply_text("🔥 Buscando vídeos virais do TikTok... aguarde!")
+    status_msg = await update.message.reply_text("🔥 Buscando vídeos virais do TikTok (Mundial)... aguarde!")
     
     try:
         # Run in executor to avoid blocking
         loop = asyncio.get_running_loop()
-        videos = await loop.run_in_executor(None, get_tiktok_trending, 15, 5)
+        # Use region='US' for global/international trending
+        videos = await loop.run_in_executor(None, get_tiktok_trending, 15, 5, 'US')
         
         if not videos:
             await status_msg.edit_text("❌ Não foi possível buscar os vídeos virais no momento. Tente novamente mais tarde.")
             return
             
-        message = "🔥 *Top 15 Vídeos Virais do TikTok (Brasil)* 🔥\n"
+        message = "🔥 *Top 15 Vídeos Virais do TikTok (Mundial)* 🔥\n"
         message += "📅 *Últimos 5 dias*\n\n"
         
         for i, v in enumerate(videos, 1):
