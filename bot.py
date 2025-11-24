@@ -54,8 +54,7 @@ async def viral(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await status_msg.edit_text("❌ Não foi possível buscar os vídeos virais no momento. Tente novamente mais tarde.")
             return
             
-        message = "🔥 *Top 15 Vídeos Virais do TikTok (Mundial)* 🔥\n"
-        message += "📅 *Últimos 5 dias*\n\n"
+        message = "🔥 *Top 15 Vídeos Virais do TikTok (Mundial)* 🔥\n\n"
         
         for i, v in enumerate(videos, 1):
             # Format numbers (e.g. 1.2M)

@@ -354,10 +354,10 @@ def get_tiktok_trending(limit: int = 15, days: int = 5, region: str = 'US') -> l
             'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
         }
         
-        # Request more than limit to allow for filtering
+        # Request more videos to allow for filtering
         params = {
             'region': region,
-            'count': 30  
+            'count': 50  # Increased from 30
         }
         
         response = requests.post(api_url, headers=headers, data=params, timeout=30)
@@ -378,21 +378,32 @@ def get_tiktok_trending(limit: int = 15, days: int = 5, region: str = 'US') -> l
         cutoff_timestamp = cutoff_date.timestamp()
         
         filtered_videos = []
+        all_videos = []  # Fallback without date filter
+        
         for v in videos:
+            video_data = {
+                'title': v.get('title', 'Sem título'),
+                'play_count': v.get('play_count', 0),
+                'digg_count': v.get('digg_count', 0),
+                'author': v.get('author', {}).get('nickname', 'Desconhecido'),
+                'url': f"https://www.tiktok.com/@{v.get('author', {}).get('unique_id', 'user')}/video/{v.get('video_id')}",
+                'cover': v.get('cover', '')
+            }
+            all_videos.append(video_data)
+            
             # create_time is unix timestamp
             create_time = v.get('create_time', 0)
             if create_time >= cutoff_timestamp:
-                filtered_videos.append({
-                    'title': v.get('title', 'Sem título'),
-                    'play_count': v.get('play_count', 0),
-                    'digg_count': v.get('digg_count', 0),
-                    'author': v.get('author', {}).get('nickname', 'Desconhecido'),
-                    'url': f"https://www.tiktok.com/@{v.get('author', {}).get('unique_id', 'user')}/video/{v.get('video_id')}",
-                    'cover': v.get('cover', '')
-                })
+                filtered_videos.append(video_data)
         
         # Sort by digg_count (likes) descending
         filtered_videos.sort(key=lambda x: x['digg_count'], reverse=True)
+        all_videos.sort(key=lambda x: x['digg_count'], reverse=True)
+        
+        # If we don't have enough filtered videos, use all videos
+        if len(filtered_videos) < limit:
+            logger.warning(f"Only {len(filtered_videos)} videos in last {days} days, using all trending videos")
+            return all_videos[:limit]
         
         return filtered_videos[:limit]
         
