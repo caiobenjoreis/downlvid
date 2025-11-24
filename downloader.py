@@ -324,3 +324,77 @@ def _download_from_direct_url(video_url: str, platform: str) -> str:
     except Exception as e:
         logger.error(f"Error downloading from direct URL: {e}")
         raise DownloadError(f"Erro ao baixar do URL direto: {str(e)}")
+
+
+def get_tiktok_trending(limit: int = 15, days: int = 5) -> list:
+    """
+    Fetches trending TikTok videos from Brazil.
+    Filters by last N days and returns top N videos.
+    
+    Args:
+        limit: Number of videos to return
+        days: How many days back to look
+        
+    Returns:
+        list: List of dictionaries with video info
+    """
+    import requests
+    import time
+    from datetime import datetime, timedelta
+    
+    logger.info(f"Fetching trending TikTok videos (limit={limit}, days={days})")
+    
+    try:
+        # TikWM Feed API
+        api_url = "https://www.tikwm.com/api/feed/list"
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        }
+        
+        # Request more than limit to allow for filtering
+        params = {
+            'region': 'BR',
+            'count': 30  
+        }
+        
+        response = requests.post(api_url, headers=headers, data=params, timeout=30)
+        
+        if response.status_code != 200:
+            logger.error(f"TikWM API error: {response.status_code}")
+            return []
+            
+        result = response.json()
+        if result.get('code') != 0:
+            logger.error(f"TikWM API returned error code: {result.get('msg')}")
+            return []
+            
+        videos = result.get('data', [])
+        
+        # Filter by date
+        cutoff_date = datetime.now() - timedelta(days=days)
+        cutoff_timestamp = cutoff_date.timestamp()
+        
+        filtered_videos = []
+        for v in videos:
+            # create_time is unix timestamp
+            create_time = v.get('create_time', 0)
+            if create_time >= cutoff_timestamp:
+                filtered_videos.append({
+                    'title': v.get('title', 'Sem título'),
+                    'play_count': v.get('play_count', 0),
+                    'digg_count': v.get('digg_count', 0),
+                    'author': v.get('author', {}).get('nickname', 'Desconhecido'),
+                    'url': f"https://www.tiktok.com/@{v.get('author', {}).get('unique_id', 'user')}/video/{v.get('video_id')}",
+                    'cover': v.get('cover', '')
+                })
+        
+        # Sort by digg_count (likes) descending
+        filtered_videos.sort(key=lambda x: x['digg_count'], reverse=True)
+        
+        return filtered_videos[:limit]
+        
+    except Exception as e:
+        logger.error(f"Error fetching trending videos: {e}")
+        return []

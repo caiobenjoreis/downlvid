@@ -6,7 +6,7 @@ from telegram import Update
 from telegram.constants import ChatAction
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 from telegram.error import TelegramError
-from downloader import download_video, DownloadError, download_instagram_alternative, download_tiktok_alternative
+from downloader import download_video, DownloadError, download_instagram_alternative, download_tiktok_alternative, get_tiktok_trending
 
 # Load environment variables
 load_dotenv()
@@ -27,6 +27,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📱 *Plataformas suportadas:*\n"
         "• Instagram (Reels, Posts, IGTV)\n"
         "• TikTok\n\n"
+        "🔥 *Novidade:*\n"
+        "Use /viral para ver os vídeos mais bombados do TikTok!\n\n"
         "📝 *Como usar:*\n"
         "1. Copie o link do vídeo\n"
         "2. Envie para mim\n"
@@ -37,6 +39,48 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Envie um link para começar! 🚀"
     )
     await update.message.reply_text(welcome_message, parse_mode='Markdown')
+
+async def viral(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Sends a list of trending TikTok videos."""
+    status_msg = await update.message.reply_text("🔥 Buscando vídeos virais do TikTok... aguarde!")
+    
+    try:
+        # Run in executor to avoid blocking
+        loop = asyncio.get_running_loop()
+        videos = await loop.run_in_executor(None, get_tiktok_trending, 15, 5)
+        
+        if not videos:
+            await status_msg.edit_text("❌ Não foi possível buscar os vídeos virais no momento. Tente novamente mais tarde.")
+            return
+            
+        message = "🔥 *Top 15 Vídeos Virais do TikTok (Brasil)* 🔥\n"
+        message += "📅 *Últimos 5 dias*\n\n"
+        
+        for i, v in enumerate(videos, 1):
+            # Format numbers (e.g. 1.2M)
+            def format_number(num):
+                if num >= 1000000:
+                    return f"{num/1000000:.1f}M"
+                elif num >= 1000:
+                    return f"{num/1000:.1f}K"
+                return str(num)
+                
+            likes = format_number(v['digg_count'])
+            views = format_number(v['play_count'])
+            
+            # Escape markdown characters in title and author
+            title = v['title'][:50] + "..." if len(v['title']) > 50 else v['title']
+            title = title.replace("*", "").replace("_", "").replace("`", "")
+            author = v['author'].replace("*", "").replace("_", "").replace("`", "")
+            
+            message += f"{i}. [{title}]({v['url']})\n"
+            message += f"   👤 {author} | ❤️ {likes} | 👁️ {views}\n\n"
+            
+        await status_msg.edit_text(message, parse_mode='Markdown', disable_web_page_preview=True)
+        
+    except Exception as e:
+        logger.error(f"Error in viral command: {e}")
+        await status_msg.edit_text("❌ Ocorreu um erro ao buscar os vídeos.")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles incoming text messages containing URLs."""
@@ -148,9 +192,11 @@ def main():
     application = ApplicationBuilder().token(TOKEN).build()
 
     start_handler = CommandHandler('start', start)
+    viral_handler = CommandHandler('viral', viral)
     msg_handler = MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message)
 
     application.add_handler(start_handler)
+    application.add_handler(viral_handler)
     application.add_handler(msg_handler)
 
     # Start dummy web server for Render
