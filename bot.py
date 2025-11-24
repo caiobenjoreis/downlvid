@@ -2,9 +2,9 @@ import os
 import logging
 import asyncio
 from dotenv import load_dotenv
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.constants import ChatAction
-from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
+from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 from telegram.error import TelegramError
 from downloader import download_video, DownloadError, download_instagram_alternative, download_tiktok_alternative, get_tiktok_trending
 
@@ -19,6 +19,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+
+# Store video URLs temporarily for download callbacks
+video_cache = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Sends a welcome message."""
@@ -41,46 +44,203 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(welcome_message, parse_mode='Markdown')
 
 async def viral(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Sends a list of trending TikTok videos."""
-    status_msg = await update.message.reply_text("🔥 Buscando vídeos virais do TikTok (Mundial)... aguarde!")
+    """Shows region selection buttons for viral videos."""
+    keyboard = [
+        [
+            InlineKeyboardButton("🌎 Mundial", callback_data="viral_US"),
+            InlineKeyboardButton("🇧🇷 Brasil", callback_data="viral_BR"),
+        ],
+        [
+            InlineKeyboardButton("🇺🇸 EUA", callback_data="viral_US"),
+            InlineKeyboardButton("🇯🇵 Japão", callback_data="viral_JP"),
+        ],
+        [
+            InlineKeyboardButton("🇬🇧 Reino Unido", callback_data="viral_GB"),
+            InlineKeyboardButton("🇫🇷 França", callback_data="viral_FR"),
+        ],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        "🔥 *Vídeos Virais do TikTok*\n\n"
+        "Escolha a região:",
+        parse_mode='Markdown',
+        reply_markup=reply_markup
+    )
+
+async def viral_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles region selection and shows viral videos."""
+    query = update.callback_query
+    await query.answer()
+    
+    region = query.data.replace("viral_", "")
+    
+    region_names = {
+        'US': 'Mundial',
+        'BR': 'Brasil',
+        'JP': 'Japão',
+        'GB': 'Reino Unido',
+        'FR': 'França'
+    }
+    
+    region_name = region_names.get(region, region)
+    
+    await query.edit_message_text(f"🔥 Buscando vídeos virais ({region_name})... aguarde!")
     
     try:
-        # Run in executor to avoid blocking
+        # Fetch videos
         loop = asyncio.get_running_loop()
-        # Use region='US' for global/international trending
-        videos = await loop.run_in_executor(None, get_tiktok_trending, 15, 5, 'US')
+        videos = await loop.run_in_executor(None, get_tiktok_trending, 15, 5, region)
         
         if not videos:
-            await status_msg.edit_text("❌ Não foi possível buscar os vídeos virais no momento. Tente novamente mais tarde.")
+            await query.edit_message_text("❌ Não foi possível buscar os vídeos virais no momento.")
             return
-            
-        message = "🔥 *Top 15 Vídeos Virais do TikTok (Mundial)* 🔥\n\n"
         
+        await query.edit_message_text(f"📤 Enviando {len(videos)} vídeos virais de {region_name}...")
+        
+        # Helper function to format numbers
+        def format_number(num):
+            if num >= 1000000:
+                return f"{num/1000000:.1f}M"
+            elif num >= 1000:
+                return f"{num/1000:.1f}K"
+            return str(num)
+        
+        # Send each video as a photo with download button
         for i, v in enumerate(videos, 1):
-            # Format numbers (e.g. 1.2M)
-            def format_number(num):
-                if num >= 1000000:
-                    return f"{num/1000000:.1f}M"
-                elif num >= 1000:
-                    return f"{num/1000:.1f}K"
-                return str(num)
+            try:
+                # Store video URL in cache for download callback
+                video_id = v['url'].split('/')[-1]
+                video_cache[video_id] = v['url']
                 
-            likes = format_number(v['digg_count'])
-            views = format_number(v['play_count'])
-            
-            # Escape markdown characters in title and author
-            title = v['title'][:50] + "..." if len(v['title']) > 50 else v['title']
-            title = title.replace("*", "").replace("_", "").replace("`", "")
-            author = v['author'].replace("*", "").replace("_", "").replace("`", "")
-            
-            message += f"{i}. [{title}]({v['url']})\n"
-            message += f"   👤 {author} | ❤️ {likes} | 👁️ {views}\n\n"
-            
-        await status_msg.edit_text(message, parse_mode='Markdown', disable_web_page_preview=True)
+                # Format stats
+                likes = format_number(v['digg_count'])
+                views = format_number(v['play_count'])
+                
+                # Create caption
+                title = v['title'][:100] + "..." if len(v['title']) > 100 else v['title']
+                caption = (
+                    f"🔥 *Vídeo #{i}*\n\n"
+                    f"📝 {title}\n\n"
+                    f"👤 {v['author']}\n"
+                    f"❤️ {likes} curtidas\n"
+                    f"👁️ {views} visualizações\n\n"
+                    f"🔗 [Ver no TikTok]({v['url']})"
+                )
+                
+                # Create download button
+                keyboard = [[InlineKeyboardButton("📥 Baixar Vídeo", callback_data=f"download_{video_id}")]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                # Send photo with caption and button
+                if v.get('cover'):
+                    try:
+                        await context.bot.send_photo(
+                            chat_id=query.message.chat_id,
+                            photo=v['cover'],
+                            caption=caption,
+                            parse_mode='Markdown',
+                            reply_markup=reply_markup
+                        )
+                    except Exception as photo_error:
+                        # If photo fails, send as text
+                        logger.warning(f"Failed to send photo: {photo_error}")
+                        await context.bot.send_message(
+                            chat_id=query.message.chat_id,
+                            text=caption,
+                            parse_mode='Markdown',
+                            reply_markup=reply_markup,
+                            disable_web_page_preview=False
+                        )
+                else:
+                    # No cover, send as text
+                    await context.bot.send_message(
+                        chat_id=query.message.chat_id,
+                        text=caption,
+                        parse_mode='Markdown',
+                        reply_markup=reply_markup,
+                        disable_web_page_preview=False
+                    )
+                
+                # Small delay to avoid rate limits
+                await asyncio.sleep(0.2)
+                
+            except Exception as e:
+                logger.error(f"Error sending video {i}: {e}")
+                continue
+        
+        # Delete the "Sending..." message
+        await query.delete_message()
         
     except Exception as e:
-        logger.error(f"Error in viral command: {e}")
-        await status_msg.edit_text("❌ Ocorreu um erro ao buscar os vídeos.")
+        logger.error(f"Error in viral_callback: {e}")
+        await query.edit_message_text("❌ Ocorreu um erro ao buscar os vídeos.")
+
+async def download_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles download button clicks."""
+    query = update.callback_query
+    await query.answer("📥 Iniciando download...")
+    
+    video_id = query.data.replace("download_", "")
+    video_url = video_cache.get(video_id)
+    
+    if not video_url:
+        await query.answer("❌ Link expirado. Use /viral novamente.", show_alert=True)
+        return
+    
+    status_msg = await query.message.reply_text("⏳ Baixando vídeo... aguarde!")
+    
+    try:
+        # Send typing action
+        await context.bot.send_chat_action(chat_id=query.message.chat_id, action=ChatAction.UPLOAD_VIDEO)
+        
+        # Download video
+        loop = asyncio.get_running_loop()
+        
+        try:
+            file_path = await loop.run_in_executor(None, download_video, video_url)
+        except DownloadError as e:
+            # Try alternative method for TikTok
+            if "tiktok.com" in video_url:
+                await status_msg.edit_text("⏳ Tentando método alternativo...")
+                try:
+                    file_path = await loop.run_in_executor(None, download_tiktok_alternative, video_url)
+                except Exception:
+                    raise e
+            else:
+                raise e
+        
+        if not os.path.exists(file_path):
+            await status_msg.edit_text("❌ Erro: Arquivo não encontrado.")
+            return
+        
+        # Send video
+        await status_msg.edit_text("📤 Enviando vídeo...")
+        
+        with open(file_path, 'rb') as video_file:
+            await query.message.reply_video(
+                video=video_file,
+                caption="✅ Download concluído! 🎥",
+                write_timeout=60,
+                read_timeout=60
+            )
+        
+        await status_msg.delete()
+        
+    except DownloadError as e:
+        logger.error(f"Download error: {e}")
+        await status_msg.edit_text(f"❌ Erro no download:\n\n{str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error in download: {e}")
+        await status_msg.edit_text("❌ Erro inesperado ao baixar o vídeo.")
+    finally:
+        # Cleanup
+        if 'file_path' in locals() and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception as e:
+                logger.warning(f"Failed to cleanup: {e}")
+
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles incoming text messages containing URLs."""
@@ -194,9 +354,15 @@ def main():
     start_handler = CommandHandler('start', start)
     viral_handler = CommandHandler('viral', viral)
     msg_handler = MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message)
+    
+    # Callback handlers for buttons
+    viral_callback_handler = CallbackQueryHandler(viral_callback, pattern='^viral_')
+    download_callback_handler = CallbackQueryHandler(download_callback, pattern='^download_')
 
     application.add_handler(start_handler)
     application.add_handler(viral_handler)
+    application.add_handler(viral_callback_handler)
+    application.add_handler(download_callback_handler)
     application.add_handler(msg_handler)
 
     # Start dummy web server for Render

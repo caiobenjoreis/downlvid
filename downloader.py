@@ -357,7 +357,7 @@ def get_tiktok_trending(limit: int = 15, days: int = 5, region: str = 'US') -> l
         # Request more videos to allow for filtering
         params = {
             'region': region,
-            'count': 50  # Increased from 30
+            'count': 200  # Increased to ensure we get enough videos
         }
         
         response = requests.post(api_url, headers=headers, data=params, timeout=30)
