@@ -153,6 +153,30 @@ def main():
     application.add_handler(start_handler)
     application.add_handler(msg_handler)
 
+    # Start dummy web server for Render
+    from threading import Thread
+    from http.server import HTTPServer, BaseHTTPRequestHandler
+
+    class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'Bot is running!')
+
+    def start_web_server():
+        port = int(os.environ.get('PORT', 8080))
+        try:
+            server = HTTPServer(('0.0.0.0', port), SimpleHTTPRequestHandler)
+            print(f"Server started on port {port}")
+            server.serve_forever()
+        except Exception as e:
+            print(f"Error starting web server: {e}")
+
+    # Run web server in background
+    thread = Thread(target=start_web_server)
+    thread.daemon = True
+    thread.start()
+
     print("Bot iniciado...")
     application.run_polling()
 
