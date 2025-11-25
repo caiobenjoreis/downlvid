@@ -500,3 +500,350 @@ def get_tiktok_trending(limit: int = 15, days: int = 5, region: str = 'US') -> l
     except Exception as e:
         logger.error(f"Error fetching trending videos: {e}")
         return []
+
+
+def get_trending_topics(category: str = 'all', region: str = 'US', limit: int = 10) -> dict:
+    """
+    Fetches trending topics/hashtags on TikTok.
+    
+    Args:
+        category: Category filter ('all', 'food', 'fashion', 'gaming', 'music', etc.)
+        region: Region code (e.g. 'BR', 'US')
+        limit: Number of topics to return
+        
+    Returns:
+        dict: Dictionary with 'trending' and 'content_gaps' lists
+    """
+    import requests
+    
+    logger.info(f"Fetching trending topics (category={category}, region={region}, limit={limit})")
+    
+    try:
+        # Get trending videos to extract popular hashtags
+        api_url = "https://www.tikwm.com/api/feed/list"
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        }
+        
+        params = {
+            'region': region,
+            'count': 100
+        }
+        
+        response = requests.post(api_url, headers=headers, data=params, timeout=30)
+        
+        if response.status_code != 200:
+            logger.error(f"API error: {response.status_code}")
+            return {'trending': [], 'content_gaps': []}
+        
+        result = response.json()
+        if result.get('code') != 0:
+            logger.error(f"API returned error: {result.get('msg')}")
+            return {'trending': [], 'content_gaps': []}
+        
+        videos = result.get('data', [])
+        
+        # Extract and count hashtags
+        hashtag_stats = {}
+        for video in videos:
+            title = video.get('title', '')
+            # Simple hashtag extraction
+            words = title.split()
+            for word in words:
+                if word.startswith('#'):
+                    hashtag = word.strip('#').lower()
+                    if hashtag:
+                        if hashtag not in hashtag_stats:
+                            hashtag_stats[hashtag] = {
+                                'name': hashtag,
+                                'count': 0,
+                                'total_views': 0,
+                                'total_likes': 0
+                            }
+                        hashtag_stats[hashtag]['count'] += 1
+                        hashtag_stats[hashtag]['total_views'] += video.get('play_count', 0)
+                        hashtag_stats[hashtag]['total_likes'] += video.get('digg_count', 0)
+        
+        # Sort by count
+        trending = sorted(hashtag_stats.values(), key=lambda x: x['count'], reverse=True)[:limit]
+        
+        # Calculate competition level and identify content gaps
+        for topic in trending:
+            avg_views = topic['total_views'] / topic['count'] if topic['count'] > 0 else 0
+            avg_likes = topic['total_likes'] / topic['count'] if topic['count'] > 0 else 0
+            
+            # Competition level based on number of videos
+            if topic['count'] > 50:
+                topic['competition'] = 'ALTA'
+            elif topic['count'] > 20:
+                topic['competition'] = 'MÉDIA'
+            else:
+                topic['competition'] = 'BAIXA'
+            
+            topic['avg_views'] = int(avg_views)
+            topic['avg_likes'] = int(avg_likes)
+            
+            # Calculate potential (high engagement, lower competition)
+            engagement_score = avg_likes / max(avg_views, 1) * 100
+            if topic['competition'] == 'BAIXA' and engagement_score > 5:
+                topic['potential'] = 'ALTO'
+            elif topic['competition'] == 'MÉDIA' and engagement_score > 3:
+                topic['potential'] = 'MÉDIO'
+            else:
+                topic['potential'] = 'BAIXO'
+        
+        # Content gaps: topics with medium/high engagement but low competition
+        content_gaps = [t for t in trending if t['competition'] in ['BAIXA', 'MÉDIA'] and t['potential'] in ['ALTO', 'MÉDIO']]
+        
+        logger.info(f"Found {len(trending)} trending topics, {len(content_gaps)} content gaps")
+        
+        return {
+            'trending': trending,
+            'content_gaps': content_gaps[:5]  # Top 5 opportunities
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching trending topics: {e}")
+        return {'trending': [], 'content_gaps': []}
+
+
+def get_creator_info(username: str) -> dict:
+    """
+    Fetches detailed information about a TikTok creator.
+    
+    Args:
+        username: TikTok username (with or without @)
+        
+    Returns:
+        dict: Creator information including stats and recent videos
+    """
+    import requests
+    
+    # Clean username
+    username = username.strip().lstrip('@')
+    
+    logger.info(f"Fetching creator info for @{username}")
+    
+    try:
+        # TikWM user info API
+        api_url = "https://www.tikwm.com/api/user/info"
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        }
+        
+        params = {
+            'unique_id': username
+        }
+        
+        response = requests.post(api_url, headers=headers, data=params, timeout=30)
+        
+        if response.status_code != 200:
+            logger.error(f"API error: {response.status_code}")
+            return None
+        
+        result = response.json()
+        if result.get('code') != 0:
+            logger.error(f"API returned error: {result.get('msg')}")
+            return None
+        
+        user_data = result.get('data', {}).get('user', {})
+        stats = result.get('data', {}).get('stats', {})
+        
+        if not user_data:
+            logger.warning(f"No data found for @{username}")
+            return None
+        
+        # Extract relevant information
+        creator_info = {
+            'username': user_data.get('unique_id', username),
+            'nickname': user_data.get('nickname', 'Unknown'),
+            'avatar': user_data.get('avatar', ''),
+            'signature': user_data.get('signature', ''),
+            'verified': user_data.get('verified', False),
+            'followers': stats.get('followerCount', 0),
+            'following': stats.get('followingCount', 0),
+            'total_likes': stats.get('heartCount', 0),
+            'video_count': stats.get('videoCount', 0),
+        }
+        
+        # Calculate engagement rate (approximate)
+        if creator_info['followers'] > 0 and creator_info['video_count'] > 0:
+            avg_likes_per_video = creator_info['total_likes'] / creator_info['video_count']
+            engagement_rate = (avg_likes_per_video / creator_info['followers']) * 100
+            creator_info['engagement_rate'] = round(engagement_rate, 2)
+        else:
+            creator_info['engagement_rate'] = 0
+        
+        logger.info(f"Successfully fetched info for @{username}")
+        return creator_info
+        
+    except Exception as e:
+        logger.error(f"Error fetching creator info for @{username}: {e}")
+        return None
+
+
+def get_creator_videos(username: str, limit: int = 10) -> list:
+    """
+    Fetches recent videos from a TikTok creator.
+    
+    Args:
+        username: TikTok username (with or without @)
+        limit: Number of videos to return
+        
+    Returns:
+        list: List of video dictionaries with performance metrics
+    """
+    import requests
+    
+    username = username.strip().lstrip('@')
+    
+    logger.info(f"Fetching videos for @{username}")
+    
+    try:
+        # Search for user's videos
+        api_url = "https://www.tikwm.com/api/user/posts"
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        }
+        
+        params = {
+            'unique_id': username,
+            'count': limit
+        }
+        
+        response = requests.post(api_url, headers=headers, data=params, timeout=30)
+        
+        if response.status_code != 200:
+            logger.error(f"API error: {response.status_code}")
+            return []
+        
+        result = response.json()
+        if result.get('code') != 0:
+            logger.error(f"API returned error: {result.get('msg')}")
+            return []
+        
+        videos = result.get('data', {}).get('videos', [])
+        
+        processed_videos = []
+        for v in videos:
+            video_data = {
+                'title': v.get('title', 'Sem título'),
+                'play_count': v.get('play_count', 0),
+                'digg_count': v.get('digg_count', 0),
+                'comment_count': v.get('comment_count', 0),
+                'share_count': v.get('share_count', 0),
+                'url': f"https://www.tiktok.com/@{username}/video/{v.get('video_id')}",
+                'cover': v.get('cover', ''),
+                'create_time': v.get('create_time', 0),
+                'duration': v.get('duration', 0)
+            }
+            processed_videos.append(video_data)
+        
+        # Sort by engagement (likes + comments + shares)
+        processed_videos.sort(
+            key=lambda x: x['digg_count'] + x['comment_count'] + x['share_count'],
+            reverse=True
+        )
+        
+        logger.info(f"Found {len(processed_videos)} videos for @{username}")
+        return processed_videos[:limit]
+        
+    except Exception as e:
+        logger.error(f"Error fetching videos for @{username}: {e}")
+        return []
+
+
+def get_trending_sounds(category: str = 'all', limit: int = 15) -> list:
+    """
+    Fetches trending sounds/music on TikTok.
+    
+    Args:
+        category: Category filter (optional)
+        limit: Number of sounds to return
+        
+    Returns:
+        list: List of trending sounds with usage statistics
+    """
+    import requests
+    
+    logger.info(f"Fetching trending sounds (category={category}, limit={limit})")
+    
+    try:
+        # Get trending videos to extract popular sounds
+        api_url = "https://www.tikwm.com/api/feed/list"
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        }
+        
+        params = {
+            'region': 'US',
+            'count': 100
+        }
+        
+        response = requests.post(api_url, headers=headers, data=params, timeout=30)
+        
+        if response.status_code != 200:
+            logger.error(f"API error: {response.status_code}")
+            return []
+        
+        result = response.json()
+        if result.get('code') != 0:
+            logger.error(f"API returned error: {result.get('msg')}")
+            return []
+        
+        videos = result.get('data', [])
+        
+        # Extract and count sounds
+        sound_stats = {}
+        for video in videos:
+            music = video.get('music_info', {})
+            if not music:
+                continue
+            
+            music_id = music.get('id', '')
+            if not music_id:
+                continue
+            
+            if music_id not in sound_stats:
+                sound_stats[music_id] = {
+                    'id': music_id,
+                    'title': music.get('title', 'Unknown'),
+                    'author': music.get('author', 'Unknown'),
+                    'duration': music.get('duration', 0),
+                    'usage_count': 0,
+                    'total_views': 0,
+                    'total_likes': 0,
+                    'url': music.get('play', '')
+                }
+            
+            sound_stats[music_id]['usage_count'] += 1
+            sound_stats[music_id]['total_views'] += video.get('play_count', 0)
+            sound_stats[music_id]['total_likes'] += video.get('digg_count', 0)
+        
+        # Sort by usage count
+        trending_sounds = sorted(sound_stats.values(), key=lambda x: x['usage_count'], reverse=True)
+        
+        # Calculate growth indicator (simplified)
+        for sound in trending_sounds:
+            avg_engagement = sound['total_likes'] / max(sound['total_views'], 1) * 100
+            if sound['usage_count'] > 10 and avg_engagement > 5:
+                sound['status'] = '🔥 VIRAL'
+            elif sound['usage_count'] > 5:
+                sound['status'] = '📈 Em Alta'
+            else:
+                sound['status'] = '🆕 Novo'
+        
+        logger.info(f"Found {len(trending_sounds)} trending sounds")
+        return trending_sounds[:limit]
+        
+    except Exception as e:
+        logger.error(f"Error fetching trending sounds: {e}")
+        return []

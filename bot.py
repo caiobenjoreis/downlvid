@@ -30,10 +30,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📱 *Plataformas suportadas:*\n"
         "• Instagram (Reels, Posts, IGTV)\n"
         "• TikTok\n\n"
-        "🔥 *Recursos:*\n"
+        "🔥 *Recursos de Download:*\n"
         "• `/viral` - Vídeos virais por região\n"
         "• `/viral #hashtag` - Buscar por tema\n"
         "• `/viral #hashtag BR` - Buscar por tema e região\n\n"
+        "✨ *Creator Insights:*\n"
+        "• `/tendencias` - Tópicos em alta e oportunidades\n"
+        "• `/analisar @user` - Análise completa de creator\n"
+        "• `/musicas` - Trending sounds do TikTok\n\n"
         "📝 *Como usar:*\n"
         "1. Copie o link do vídeo\n"
         "2. Envie para mim\n"
@@ -44,6 +48,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Envie um link para começar! 🚀"
     )
     await update.message.reply_text(welcome_message, parse_mode='Markdown')
+
 
 
 async def viral(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -570,6 +575,305 @@ async def viral_filter_callback(update: Update, context: ContextTypes.DEFAULT_TY
         )
 
 
+async def tendencias(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Shows trending topics and content gaps."""
+    from downloader import get_trending_topics
+    
+    # Get category from args if provided
+    category = 'all'
+    region = 'BR'  # Default to Brazil
+    
+    if context.args:
+        category = context.args[0].lower()
+    
+    status_msg = await update.message.reply_text(
+        f"🔍 Buscando tendências...\n\nAguarde um momento! ⏳",
+        parse_mode='Markdown'
+    )
+    
+    try:
+        # Fetch trending topics
+        loop = asyncio.get_running_loop()
+        data = await loop.run_in_executor(None, get_trending_topics, category, region, 10)
+        
+        trending = data.get('trending', [])
+        content_gaps = data.get('content_gaps', [])
+        
+        if not trending:
+            await status_msg.edit_text(
+                "❌ Não foi possível buscar tendências no momento.\n\n"
+                "Tente novamente mais tarde.",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Helper function to format numbers
+        def format_number(num):
+            if num >= 1000000:
+                return f"{num/1000000:.1f}M"
+            elif num >= 1000:
+                return f"{num/1000:.1f}K"
+            return str(num)
+        
+        # Build trending topics message
+        message = "🔥 *Tendências no TikTok*\n\n📈 *Em Alta:*\n"
+        
+        for i, topic in enumerate(trending[:5], 1):
+            comp_emoji = {
+                'ALTA': '🔴',
+                'MÉDIA': '🟡',
+                'BAIXA': '🟢'
+            }.get(topic['competition'], '⚪')
+            
+            message += (
+                f"{i}. #{topic['name']}\n"
+                f"   📊 {topic['count']} vídeos\n"
+                f"   {comp_emoji} Competição: {topic['competition']}\n"
+                f"   👁️ Média: {format_number(topic['avg_views'])} views\n\n"
+            )
+        
+        # Add content gaps if available
+        if content_gaps:
+            message += "\n💡 *Oportunidades (Content Gaps):*\n\n"
+            for i, gap in enumerate(content_gaps[:3], 1):
+                pot_emoji = {
+                    'ALTO': '🔥',
+                    'MÉDIO': '⭐',
+                    'BAIXO': '💫'
+                }.get(gap['potential'], '💫')
+                
+                message += (
+                    f"{i}. #{gap['name']}\n"
+                    f"   {pot_emoji} Potencial: {gap['potential']}\n"
+                    f"   🟢 Competição: {gap['competition']}\n"
+                    f"   ❤️ Média: {format_number(gap['avg_likes'])} curtidas\n\n"
+                )
+            
+            message += "\n💡 *Dica:* Content gaps são temas com boa demanda\nmas pouca concorrência - perfeito para viralizar!"
+        
+        await status_msg.edit_text(message, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"Error in tendencias: {e}")
+        await status_msg.edit_text(
+            "❌ Ocorreu um erro ao buscar tendências.\n\n"
+            "Tente novamente mais tarde.",
+            parse_mode='Markdown'
+        )
+
+
+async def analisar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Analyzes a TikTok creator's profile and performance."""
+    from downloader import get_creator_info, get_creator_videos
+    
+    # Check if username was provided
+    if not context.args:
+        await update.message.reply_text(
+            "❌ *Uso incorreto!*\n\n"
+            "Use: `/analisar @username`\n\n"
+            "Exemplo: `/analisar @whinderssonnunes`",
+            parse_mode='Markdown'
+        )
+        return
+    
+    username = context.args[0]
+    
+    status_msg = await update.message.reply_text(
+        f"📊 Analisando @{username.lstrip('@')}...\n\nAguarde! ⏳",
+        parse_mode='Markdown'
+    )
+    
+    try:
+        # Fetch creator info
+        loop = asyncio.get_running_loop()
+        creator_info = await loop.run_in_executor(None, get_creator_info, username)
+        
+        if not creator_info:
+            await status_msg.edit_text(
+                f"❌ Não foi possível encontrar @{username.lstrip('@')}\n\n"
+                f"💡 *Verifique:*\n"
+                f"• O username está correto\n"
+                f"• O perfil é público\n"
+                f"• O usuário existe no TikTok",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Fetch recent videos
+        videos = await loop.run_in_executor(None, get_creator_videos, username, 5)
+        
+        # Helper function to format numbers
+        def format_number(num):
+            if num >= 1000000:
+                return f"{num/1000000:.1f}M"
+            elif num >= 1000:
+                return f"{num/1000:.1f}K"
+            return str(num)
+        
+        # Build analysis message
+        verified_badge = "✅" if creator_info.get('verified') else ""
+        
+        message = (
+            f"📊 *Análise de @{creator_info['username']}* {verified_badge}\n\n"
+            f"👤 *Perfil:*\n"
+            f"• Nome: {creator_info['nickname']}\n"
+            f"• Seguidores: {format_number(creator_info['followers'])}\n"
+            f"• Seguindo: {format_number(creator_info['following'])}\n"
+            f"• Total de likes: {format_number(creator_info['total_likes'])}\n"
+            f"• Vídeos: {format_number(creator_info['video_count'])}\n\n"
+            f"📈 *Engajamento:*\n"
+            f"• Taxa média: {creator_info['engagement_rate']}%\n"
+        )
+        
+        if creator_info['signature']:
+            bio = creator_info['signature'][:100]
+            if len(creator_info['signature']) > 100:
+                bio += "..."
+            message += f"\n📝 *Bio:* {bio}\n"
+        
+        # Add top videos if available
+        if videos:
+            message += f"\n🎬 *Top {len(videos)} Vídeos Recentes:*\n\n"
+            for i, v in enumerate(videos[:3], 1):
+                title = v['title'][:50] + "..." if len(v['title']) > 50 else v['title']
+                message += (
+                    f"{i}. {title}\n"
+                    f"   👁️ {format_number(v['play_count'])} views\n"
+                    f"   ❤️ {format_number(v['digg_count'])} curtidas\n"
+                    f"   💬 {format_number(v['comment_count'])} comentários\n\n"
+                )
+        
+        message += (
+            f"\n💡 *Insights:*\n"
+            f"• Média de likes por vídeo: {format_number(creator_info['total_likes'] // max(creator_info['video_count'], 1))}\n"
+        )
+        
+        # Send analysis
+        if creator_info.get('avatar'):
+            try:
+                await context.bot.send_photo(
+                    chat_id=update.effective_chat.id,
+                    photo=creator_info['avatar'],
+                    caption=message,
+                    parse_mode='Markdown'
+                )
+                await status_msg.delete()
+            except Exception:
+                await status_msg.edit_text(message, parse_mode='Markdown')
+        else:
+            await status_msg.edit_text(message, parse_mode='Markdown')
+        
+        # Send top videos with download buttons
+        if videos:
+            for i, v in enumerate(videos[:3], 1):
+                try:
+                    # Store video URL in cache
+                    video_id = v['url'].split('/')[-1]
+                    video_cache[video_id] = v['url']
+                    
+                    # Create download button
+                    keyboard = [[InlineKeyboardButton("📥 Baixar Vídeo", callback_data=f"download_{video_id}")]]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    
+                    title = v['title'][:100] + "..." if len(v['title']) > 100 else v['title']
+                    caption = (
+                        f"🔥 *Top #{i}*\n\n"
+                        f"📝 {title}\n\n"
+                        f"👁️ {format_number(v['play_count'])} views\n"
+                        f"❤️ {format_number(v['digg_count'])} curtidas\n"
+                        f"💬 {format_number(v['comment_count'])} comentários\n\n"
+                        f"🔗 [Ver no TikTok]({v['url']})"
+                    )
+                    
+                    if v.get('cover'):
+                        try:
+                            await context.bot.send_photo(
+                                chat_id=update.effective_chat.id,
+                                photo=v['cover'],
+                                caption=caption,
+                                parse_mode='Markdown',
+                                reply_markup=reply_markup
+                            )
+                        except Exception:
+                            await context.bot.send_message(
+                                chat_id=update.effective_chat.id,
+                                text=caption,
+                                parse_mode='Markdown',
+                                reply_markup=reply_markup,
+                                disable_web_page_preview=False
+                            )
+                    
+                    await asyncio.sleep(0.3)
+                    
+                except Exception as e:
+                    logger.error(f"Error sending video {i}: {e}")
+                    continue
+        
+    except Exception as e:
+        logger.error(f"Error in analisar: {e}")
+        await status_msg.edit_text(
+            "❌ Ocorreu um erro ao analisar o creator.\n\n"
+            "Tente novamente mais tarde.",
+            parse_mode='Markdown'
+        )
+
+
+async def musicas(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Shows trending sounds/music on TikTok."""
+    from downloader import get_trending_sounds
+    
+    category = 'all'
+    if context.args:
+        category = context.args[0].lower()
+    
+    status_msg = await update.message.reply_text(
+        "🎵 Buscando trending sounds...\n\nAguarde! ⏳",
+        parse_mode='Markdown'
+    )
+    
+    try:
+        # Fetch trending sounds
+        loop = asyncio.get_running_loop()
+        sounds = await loop.run_in_executor(None, get_trending_sounds, category, 15)
+        
+        if not sounds:
+            await status_msg.edit_text(
+                "❌ Não foi possível buscar trending sounds.\n\n"
+                "Tente novamente mais tarde.",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Build message
+        message = "🎵 *Trending Sounds no TikTok*\n\n"
+        
+        for i, sound in enumerate(sounds[:10], 1):
+            # Truncate title if too long
+            title = sound['title'][:40] + "..." if len(sound['title']) > 40 else sound['title']
+            author = sound['author'][:30] + "..." if len(sound['author']) > 30 else sound['author']
+            
+            message += (
+                f"{i}. *{title}*\n"
+                f"   🎤 {author}\n"
+                f"   📊 {sound['usage_count']} vídeos\n"
+                f"   {sound['status']}\n\n"
+            )
+        
+        message += (
+            "\n💡 *Dica:* Sons com status 🔥 VIRAL têm\n"
+            "maior chance de impulsionar seu vídeo!"
+        )
+        
+        await status_msg.edit_text(message, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"Error in musicas: {e}")
+        await status_msg.edit_text(
+            "❌ Ocorreu um erro ao buscar trending sounds.\n\n"
+            "Tente novamente mais tarde.",
+            parse_mode='Markdown'
+        )
+
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles incoming text messages containing URLs."""
@@ -682,6 +986,9 @@ def main():
 
     start_handler = CommandHandler('start', start)
     viral_handler = CommandHandler('viral', viral)
+    tendencias_handler = CommandHandler('tendencias', tendencias)
+    analisar_handler = CommandHandler('analisar', analisar)
+    musicas_handler = CommandHandler('musicas', musicas)
     msg_handler = MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message)
     
     
@@ -692,6 +999,9 @@ def main():
 
     application.add_handler(start_handler)
     application.add_handler(viral_handler)
+    application.add_handler(tendencias_handler)
+    application.add_handler(analisar_handler)
+    application.add_handler(musicas_handler)
     application.add_handler(viral_callback_handler)
     application.add_handler(filter_callback_handler)
     application.add_handler(download_callback_handler)
