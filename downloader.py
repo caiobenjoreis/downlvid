@@ -560,11 +560,16 @@ def get_trending_topics(category: str = 'all', region: str = 'US', limit: int = 
                                 'name': hashtag,
                                 'count': 0,
                                 'total_views': 0,
-                                'total_likes': 0
+                                'total_likes': 0,
+                                'top_video': f"https://www.tiktok.com/@{video.get('author', {}).get('unique_id', 'user')}/video/{video.get('video_id')}"
                             }
                         hashtag_stats[hashtag]['count'] += 1
                         hashtag_stats[hashtag]['total_views'] += video.get('play_count', 0)
                         hashtag_stats[hashtag]['total_likes'] += video.get('digg_count', 0)
+                        
+                        # Update top video if this one has more likes
+                        if video.get('digg_count', 0) > hashtag_stats[hashtag]['total_likes'] / hashtag_stats[hashtag]['count']:
+                             hashtag_stats[hashtag]['top_video'] = f"https://www.tiktok.com/@{video.get('author', {}).get('unique_id', 'user')}/video/{video.get('video_id')}"
         
         # Sort by count
         trending = sorted(hashtag_stats.values(), key=lambda x: x['count'], reverse=True)[:limit]
@@ -607,6 +612,84 @@ def get_trending_topics(category: str = 'all', region: str = 'US', limit: int = 
     except Exception as e:
         logger.error(f"Error fetching trending topics: {e}")
         return {'trending': [], 'content_gaps': []}
+
+
+def analyze_creator_content(videos: list) -> dict:
+    """
+    Analyzes a list of videos to extract insights about best times, hashtags, etc.
+    
+    Args:
+        videos: List of video dictionaries
+        
+    Returns:
+        dict: Analysis results
+    """
+    from datetime import datetime
+    from collections import Counter
+    
+    if not videos:
+        return {}
+        
+    hour_stats = {}
+    day_stats = {}
+    hashtags = []
+    durations = []
+    
+    for v in videos:
+        # Time analysis
+        ts = v.get('create_time', 0)
+        if ts:
+            dt = datetime.fromtimestamp(ts)
+            hour = dt.hour
+            day = dt.strftime('%A') # e.g., Monday
+            
+            # Group hours into blocks
+            if 6 <= hour < 12: time_block = 'Manhã (6h-12h)'
+            elif 12 <= hour < 18: time_block = 'Tarde (12h-18h)'
+            elif 18 <= hour < 24: time_block = 'Noite (18h-00h)'
+            else: time_block = 'Madrugada (00h-6h)'
+            
+            # Engagement score (likes + comments)
+            engagement = v.get('digg_count', 0) + v.get('comment_count', 0)
+            
+            if time_block not in hour_stats: hour_stats[time_block] = []
+            hour_stats[time_block].append(engagement)
+            
+            if day not in day_stats: day_stats[day] = []
+            day_stats[day].append(engagement)
+            
+        # Hashtag analysis
+        title = v.get('title', '')
+        for word in title.split():
+            if word.startswith('#'):
+                hashtags.append(word.lower())
+                
+        # Duration analysis
+        durations.append(v.get('duration', 0))
+        
+    # Calculate best times
+    best_time = max(hour_stats.items(), key=lambda x: sum(x[1])/len(x[1]))[0] if hour_stats else "N/A"
+    
+    # Translate days
+    day_translation = {
+        'Monday': 'Segunda', 'Tuesday': 'Terça', 'Wednesday': 'Quarta',
+        'Thursday': 'Quinta', 'Friday': 'Sexta', 'Saturday': 'Sábado', 'Sunday': 'Domingo'
+    }
+    best_day_en = max(day_stats.items(), key=lambda x: sum(x[1])/len(x[1]))[0] if day_stats else "N/A"
+    best_day = day_translation.get(best_day_en, best_day_en)
+    
+    # Top hashtags
+    top_hashtags = [h for h, c in Counter(hashtags).most_common(5)]
+    
+    # Avg duration
+    avg_duration = sum(durations) / len(durations) if durations else 0
+    
+    return {
+        'best_time': best_time,
+        'best_day': best_day,
+        'top_hashtags': top_hashtags,
+        'avg_duration': int(avg_duration)
+    }
 
 
 def get_creator_info(username: str) -> dict:

@@ -625,11 +625,14 @@ async def tendencias(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 'BAIXA': '🟢'
             }.get(topic['competition'], '⚪')
             
+            top_video_link = f"[📹 Ver Exemplo]({topic.get('top_video', '')})" if topic.get('top_video') else ""
+            
             message += (
                 f"{i}. #{topic['name']}\n"
                 f"   📊 {topic['count']} vídeos\n"
                 f"   {comp_emoji} Competição: {topic['competition']}\n"
-                f"   👁️ Média: {format_number(topic['avg_views'])} views\n\n"
+                f"   👁️ Média: {format_number(topic['avg_views'])} views\n"
+                f"   {top_video_link}\n\n"
             )
         
         # Add content gaps if available
@@ -743,8 +746,23 @@ async def analisar(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"   💬 {format_number(v['comment_count'])} comentários\n\n"
                 )
         
+        # Analyze content
+        from downloader import analyze_creator_content
+        analysis = analyze_creator_content(videos)
+        
         message += (
-            f"\n💡 *Insights:*\n"
+            f"\n💡 *Inteligência Artificial (Análise):*\n"
+            f"🕒 *Melhor Horário:* {analysis.get('best_time', 'N/A')}\n"
+            f"📅 *Melhor Dia:* {analysis.get('best_day', 'N/A')}\n"
+            f"⏱️ *Duração Ideal:* {analysis.get('avg_duration', 0)}s\n"
+        )
+        
+        if analysis.get('top_hashtags'):
+            tags = " ".join([f"#{t}" for t in analysis['top_hashtags'][:3]])
+            message += f"🏷️ *Top Hashtags:* {tags}\n"
+            
+        message += (
+            f"\n📈 *Performance:*\n"
             f"• Média de likes por vídeo: {format_number(creator_info['total_likes'] // max(creator_info['video_count'], 1))}\n"
         )
         
@@ -847,24 +865,56 @@ async def musicas(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Build message
         message = "🎵 *Trending Sounds no TikTok*\n\n"
         
-        for i, sound in enumerate(sounds[:10], 1):
+        for i, sound in enumerate(sounds[:5], 1):
             # Truncate title if too long
             title = sound['title'][:40] + "..." if len(sound['title']) > 40 else sound['title']
             author = sound['author'][:30] + "..." if len(sound['author']) > 30 else sound['author']
             
-            message += (
+            caption = (
                 f"{i}. *{title}*\n"
                 f"   🎤 {author}\n"
                 f"   📊 {sound['usage_count']} vídeos\n"
-                f"   {sound['status']}\n\n"
+                f"   {sound['status']}\n"
+                f"   🔗 [Ver no TikTok]({sound.get('url', '')})"
             )
+            
+            # Try to send audio
+            sent_audio = False
+            if sound.get('url'):
+                try:
+                    await context.bot.send_audio(
+                        chat_id=update.effective_chat.id,
+                        audio=sound['url'],
+                        title=title,
+                        performer=author,
+                        caption=caption,
+                        parse_mode='Markdown'
+                    )
+                    sent_audio = True
+                    await asyncio.sleep(0.5) # Avoid rate limits
+                except Exception:
+                    pass
+            
+            if not sent_audio:
+                message += f"{caption}\n\n"
         
+        if not message.strip():
+             message = "🎵 *Trending Sounds no TikTok*\n\n(Áudios enviados acima)"
+
         message += (
             "\n💡 *Dica:* Sons com status 🔥 VIRAL têm\n"
             "maior chance de impulsionar seu vídeo!"
         )
         
-        await status_msg.edit_text(message, parse_mode='Markdown')
+        if "Trending Sounds" in message:
+             await status_msg.edit_text(message, parse_mode='Markdown')
+        else:
+             await status_msg.delete()
+             await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=message,
+                parse_mode='Markdown'
+             )
         
     except Exception as e:
         logger.error(f"Error in musicas: {e}")
