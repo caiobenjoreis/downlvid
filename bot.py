@@ -23,31 +23,45 @@ TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 # Store video URLs temporarily for download callbacks
 video_cache = {}
 
+def get_main_menu_keyboard():
+    """Creates the main menu keyboard."""
+    keyboard = [
+        [
+            InlineKeyboardButton("🔥 Vídeos Virais", callback_data="menu_viral"),
+            InlineKeyboardButton("📈 Tendências", callback_data="menu_trends"),
+        ],
+        [
+            InlineKeyboardButton("📊 Analisar Creator", callback_data="menu_analyze"),
+            InlineKeyboardButton("🎵 Top Músicas", callback_data="menu_music"),
+        ],
+        [
+            InlineKeyboardButton("❓ Como Usar", callback_data="menu_help"),
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Sends a welcome message."""
+    """Sends a welcome message with interactive menu."""
     welcome_message = (
-        "🎬 *Bem-vindo ao Bot de Download de Vídeos!*\n\n"
-        "📱 *Plataformas suportadas:*\n"
-        "• Instagram (Reels, Posts, IGTV)\n"
-        "• TikTok\n\n"
-        "🔥 *Recursos de Download:*\n"
-        "• `/viral` - Vídeos virais por região\n"
-        "• `/viral #hashtag` - Buscar por tema\n"
-        "• `/viral #hashtag BR` - Buscar por tema e região\n\n"
-        "✨ *Creator Insights:*\n"
-        "• `/tendencias` - Tópicos em alta e oportunidades\n"
-        "• `/analisar @user` - Análise completa de creator\n"
-        "• `/musicas` - Trending sounds do TikTok\n\n"
-        "📝 *Como usar:*\n"
-        "1. Copie o link do vídeo\n"
-        "2. Envie para mim\n"
-        "3. Aguarde o download\n\n"
-        "⚠️ *Importante:*\n"
-        "• O vídeo deve ser público\n"
-        "• Links privados não funcionam\n\n"
-        "Envie um link para começar! 🚀"
+        "🎬 *Painel de Controle*\n\n"
+        "Olá! Eu sou seu assistente de vídeos virais.\n"
+        "Escolha uma opção abaixo para começar:\n\n"
+        "👇 *Navegue pelo menu:*"
     )
-    await update.message.reply_text(welcome_message, parse_mode='Markdown')
+    
+    if update.callback_query:
+        await update.callback_query.edit_message_text(
+            welcome_message,
+            reply_markup=get_main_menu_keyboard(),
+            parse_mode='Markdown'
+        )
+    else:
+        await update.message.reply_text(
+            welcome_message,
+            reply_markup=get_main_menu_keyboard(),
+            parse_mode='Markdown'
+        )
 
 
 
@@ -925,6 +939,46 @@ async def musicas(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles main menu button clicks."""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data
+    
+    if data == "menu_viral":
+        await viral(update, context)
+    
+    elif data == "menu_trends":
+        await tendencias(update, context)
+        
+    elif data == "menu_analyze":
+        await query.edit_message_text(
+            "📊 *Análise de Creator*\n\n"
+            "Para analisar um perfil, envie o comando:\n"
+            "`/analisar @usuario`\n\n"
+            "Exemplo: `/analisar @whinderssonnunes`\n\n"
+            "🔙 [Voltar ao Menu](/start)",
+            parse_mode='Markdown'
+        )
+        
+    elif data == "menu_music":
+        await musicas(update, context)
+        
+    elif data == "menu_help":
+        await query.edit_message_text(
+            "📝 *Como Baixar Vídeos*\n\n"
+            "1. Copie o link do vídeo (TikTok ou Instagram)\n"
+            "2. Cole aqui no chat e envie\n"
+            "3. Aguarde o download!\n\n"
+            "⚠️ *Importante:*\n"
+            "• O perfil deve ser público\n"
+            "• Stories do Instagram também funcionam!\n\n"
+            "🔙 [Voltar ao Menu](/start)",
+            parse_mode='Markdown'
+        )
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles incoming text messages containing URLs."""
     url = update.message.text.strip()
@@ -1043,6 +1097,7 @@ def main():
     
     
     # Callback handlers for buttons
+    menu_callback_handler = CallbackQueryHandler(menu_callback, pattern='^menu_')
     viral_callback_handler = CallbackQueryHandler(viral_callback, pattern='^viral_')
     download_callback_handler = CallbackQueryHandler(download_callback, pattern='^download_')
     filter_callback_handler = CallbackQueryHandler(viral_filter_callback, pattern='^filter_')
@@ -1052,6 +1107,7 @@ def main():
     application.add_handler(tendencias_handler)
     application.add_handler(analisar_handler)
     application.add_handler(musicas_handler)
+    application.add_handler(menu_callback_handler)
     application.add_handler(viral_callback_handler)
     application.add_handler(filter_callback_handler)
     application.add_handler(download_callback_handler)
