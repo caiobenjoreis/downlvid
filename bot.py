@@ -103,17 +103,31 @@ async def viral(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("🇬🇧 Reino Unido", callback_data="viral_GB"),
             InlineKeyboardButton("🇫🇷 França", callback_data="viral_FR"),
         ],
+        [
+            InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="back_to_menu"),
+        ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(
+    text = (
         "🔥 *Vídeos Virais do TikTok*\n\n"
         "Escolha a região:\n\n"
         "💡 *Dica:* Use `/viral #hashtag` para buscar por tema!\n"
-        "Exemplo: `/viral #futebol` ou `/viral #receitas BR`",
-        parse_mode='Markdown',
-        reply_markup=reply_markup
+        "Exemplo: `/viral #futebol` ou `/viral #receitas BR`"
     )
+    
+    if update.callback_query:
+        await update.callback_query.edit_message_text(
+            text,
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
+    else:
+        await update.message.reply_text(
+            text,
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
 
 async def viral_hashtag_search(update: Update, context: ContextTypes.DEFAULT_TYPE, hashtag: str, region: str = 'US', sort_by: str = 'likes'):
     """Searches and displays TikTok videos by hashtag."""
@@ -600,10 +614,16 @@ async def tendencias(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args:
         category = context.args[0].lower()
     
-    status_msg = await update.message.reply_text(
-        f"🔍 Buscando tendências...\n\nAguarde um momento! ⏳",
-        parse_mode='Markdown'
-    )
+    if update.callback_query:
+        status_msg = await update.callback_query.edit_message_text(
+            f"🔍 Buscando tendências...\n\nAguarde um momento! ⏳",
+            parse_mode='Markdown'
+        )
+    else:
+        status_msg = await update.message.reply_text(
+            f"🔍 Buscando tendências...\n\nAguarde um momento! ⏳",
+            parse_mode='Markdown'
+        )
     
     try:
         # Fetch trending topics
@@ -858,10 +878,16 @@ async def musicas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args:
         category = context.args[0].lower()
     
-    status_msg = await update.message.reply_text(
-        "🎵 Buscando trending sounds...\n\nAguarde! ⏳",
-        parse_mode='Markdown'
-    )
+    if update.callback_query:
+        status_msg = await update.callback_query.edit_message_text(
+            "🎵 Buscando trending sounds...\n\nAguarde! ⏳",
+            parse_mode='Markdown'
+        )
+    else:
+        status_msg = await update.message.reply_text(
+            "🎵 Buscando trending sounds...\n\nAguarde! ⏳",
+            parse_mode='Markdown'
+        )
     
     try:
         # Fetch trending sounds
