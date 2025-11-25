@@ -30,8 +30,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📱 *Plataformas suportadas:*\n"
         "• Instagram (Reels, Posts, IGTV)\n"
         "• TikTok\n\n"
-        "🔥 *Novidade:*\n"
-        "Use /viral para ver os vídeos mais bombados do TikTok!\n\n"
+        "🔥 *Recursos:*\n"
+        "• `/viral` - Vídeos virais por região\n"
+        "• `/viral #hashtag` - Buscar por tema\n"
+        "• `/viral #hashtag BR` - Buscar por tema e região\n\n"
         "📝 *Como usar:*\n"
         "1. Copie o link do vídeo\n"
         "2. Envie para mim\n"
@@ -43,8 +45,32 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(welcome_message, parse_mode='Markdown')
 
+
 async def viral(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Shows region selection buttons for viral videos."""
+    """Shows region selection buttons for viral videos or searches by hashtag."""
+    
+    # Check if user provided arguments (hashtag and/or region)
+    args = context.args
+    
+    if args:
+        # User provided hashtag/parameters
+        hashtag = None
+        region = 'US'  # Default region
+        
+        # Parse arguments
+        for arg in args:
+            if arg.upper() in ['BR', 'US', 'JP', 'GB', 'FR']:
+                region = arg.upper()
+            else:
+                # Assume it's the hashtag
+                hashtag = arg.strip().lstrip('#')
+        
+        if hashtag:
+            # Search by hashtag
+            await viral_hashtag_search(update, context, hashtag, region)
+            return
+    
+    # No arguments - show region selection (original behavior)
     keyboard = [
         [
             InlineKeyboardButton("🌎 Mundial", callback_data="viral_US"),
@@ -63,10 +89,162 @@ async def viral(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(
         "🔥 *Vídeos Virais do TikTok*\n\n"
-        "Escolha a região:",
+        "Escolha a região:\n\n"
+        "💡 *Dica:* Use `/viral #hashtag` para buscar por tema!\n"
+        "Exemplo: `/viral #futebol` ou `/viral #receitas BR`",
         parse_mode='Markdown',
         reply_markup=reply_markup
     )
+
+async def viral_hashtag_search(update: Update, context: ContextTypes.DEFAULT_TYPE, hashtag: str, region: str = 'US', sort_by: str = 'likes'):
+    """Searches and displays TikTok videos by hashtag."""
+    from downloader import search_tiktok_by_hashtag
+    
+    region_names = {
+        'US': 'Mundial',
+        'BR': 'Brasil',
+        'JP': 'Japão',
+        'GB': 'Reino Unido',
+        'FR': 'França'
+    }
+    
+    region_name = region_names.get(region, region)
+    
+    # Send initial message
+    status_msg = await update.message.reply_text(
+        f"🔍 Buscando vídeos de *#{hashtag}* ({region_name})...\n\n"
+        f"Aguarde um momento! ⏳",
+        parse_mode='Markdown'
+    )
+    
+    try:
+        # Fetch videos
+        loop = asyncio.get_running_loop()
+        videos = await loop.run_in_executor(None, search_tiktok_by_hashtag, hashtag, 15, region, sort_by)
+        
+        if not videos:
+            await status_msg.edit_text(
+                f"❌ Nenhum vídeo encontrado para *#{hashtag}*\n\n"
+                f"💡 Tente:\n"
+                f"• Verificar a ortografia\n"
+                f"• Usar hashtags mais populares\n"
+                f"• Mudar a região",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Create filter buttons
+        sort_emoji = {
+            'likes': '❤️',
+            'views': '👁️',
+            'date': '🆕'
+        }
+        current_emoji = sort_emoji.get(sort_by, '❤️')
+        
+        filter_keyboard = [
+            [
+                InlineKeyboardButton(
+                    f"{'✅ ' if sort_by == 'likes' else ''}❤️ Curtidas",
+                    callback_data=f"filter_{hashtag}_{region}_likes"
+                ),
+                InlineKeyboardButton(
+                    f"{'✅ ' if sort_by == 'views' else ''}👁️ Views",
+                    callback_data=f"filter_{hashtag}_{region}_views"
+                ),
+                InlineKeyboardButton(
+                    f"{'✅ ' if sort_by == 'date' else ''}🆕 Recentes",
+                    callback_data=f"filter_{hashtag}_{region}_date"
+                ),
+            ]
+        ]
+        filter_markup = InlineKeyboardMarkup(filter_keyboard)
+        
+        await status_msg.edit_text(
+            f"📤 Enviando {len(videos)} vídeos de *#{hashtag}* ({region_name})\n\n"
+            f"Ordenado por: {current_emoji}",
+            parse_mode='Markdown',
+            reply_markup=filter_markup
+        )
+        
+        # Helper function to format numbers
+        def format_number(num):
+            if num >= 1000000:
+                return f"{num/1000000:.1f}M"
+            elif num >= 1000:
+                return f"{num/1000:.1f}K"
+            return str(num)
+        
+        # Send each video as a photo with download button
+        for i, v in enumerate(videos, 1):
+            try:
+                # Store video URL in cache for download callback
+                video_id = v['url'].split('/')[-1]
+                video_cache[video_id] = v['url']
+                
+                # Format stats
+                likes = format_number(v['digg_count'])
+                views = format_number(v['play_count'])
+                
+                # Create caption
+                title = v['title'][:100] + "..." if len(v['title']) > 100 else v['title']
+                caption = (
+                    f"🔥 *Vídeo #{i}* - #{hashtag}\n\n"
+                    f"📝 {title}\n\n"
+                    f"👤 {v['author']}\n"
+                    f"❤️ {likes} curtidas\n"
+                    f"👁️ {views} visualizações\n\n"
+                    f"🔗 [Ver no TikTok]({v['url']})"
+                )
+                
+                # Create download button
+                keyboard = [[InlineKeyboardButton("📥 Baixar Vídeo", callback_data=f"download_{video_id}")]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                # Send photo with caption and button
+                if v.get('cover'):
+                    try:
+                        await context.bot.send_photo(
+                            chat_id=update.effective_chat.id,
+                            photo=v['cover'],
+                            caption=caption,
+                            parse_mode='Markdown',
+                            reply_markup=reply_markup
+                        )
+                    except Exception as photo_error:
+                        # If photo fails, send as text
+                        logger.warning(f"Failed to send photo: {photo_error}")
+                        await context.bot.send_message(
+                            chat_id=update.effective_chat.id,
+                            text=caption,
+                            parse_mode='Markdown',
+                            reply_markup=reply_markup,
+                            disable_web_page_preview=False
+                        )
+                else:
+                    # No cover, send as text
+                    await context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text=caption,
+                        parse_mode='Markdown',
+                        reply_markup=reply_markup,
+                        disable_web_page_preview=False
+                    )
+                
+                # Small delay to avoid rate limits
+                await asyncio.sleep(0.2)
+                
+            except Exception as e:
+                logger.error(f"Error sending video {i}: {e}")
+                continue
+        
+    except Exception as e:
+        logger.error(f"Error in viral_hashtag_search: {e}")
+        await status_msg.edit_text(
+            f"❌ Ocorreu um erro ao buscar vídeos de #{hashtag}\n\n"
+            f"Tente novamente mais tarde.",
+            parse_mode='Markdown'
+        )
+
 
 async def viral_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles region selection and shows viral videos."""
@@ -242,6 +420,157 @@ async def download_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.warning(f"Failed to cleanup: {e}")
 
 
+async def viral_filter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles filter button clicks for hashtag search results."""
+    query = update.callback_query
+    await query.answer()
+    
+    # Parse callback data: filter_hashtag_region_sortby
+    parts = query.data.replace("filter_", "").split("_")
+    
+    if len(parts) < 3:
+        await query.answer("❌ Erro ao processar filtro", show_alert=True)
+        return
+    
+    # Extract parameters
+    sort_by = parts[-1]  # Last part is sort_by
+    region = parts[-2]   # Second to last is region
+    hashtag = "_".join(parts[:-2])  # Everything else is hashtag
+    
+    from downloader import search_tiktok_by_hashtag
+    
+    region_names = {
+        'US': 'Mundial',
+        'BR': 'Brasil',
+        'JP': 'Japão',
+        'GB': 'Reino Unido',
+        'FR': 'França'
+    }
+    
+    region_name = region_names.get(region, region)
+    
+    await query.edit_message_text(
+        f"🔍 Reordenando vídeos de *#{hashtag}* ({region_name})...\n\n"
+        f"Aguarde! ⏳",
+        parse_mode='Markdown'
+    )
+    
+    try:
+        # Fetch videos with new sort order
+        loop = asyncio.get_running_loop()
+        videos = await loop.run_in_executor(None, search_tiktok_by_hashtag, hashtag, 15, region, sort_by)
+        
+        if not videos:
+            await query.edit_message_text(
+                f"❌ Nenhum vídeo encontrado para *#{hashtag}*",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Create filter buttons with current selection marked
+        filter_keyboard = [
+            [
+                InlineKeyboardButton(
+                    f"{'✅ ' if sort_by == 'likes' else ''}❤️ Curtidas",
+                    callback_data=f"filter_{hashtag}_{region}_likes"
+                ),
+                InlineKeyboardButton(
+                    f"{'✅ ' if sort_by == 'views' else ''}👁️ Views",
+                    callback_data=f"filter_{hashtag}_{region}_views"
+                ),
+                InlineKeyboardButton(
+                    f"{'✅ ' if sort_by == 'date' else ''}🆕 Recentes",
+                    callback_data=f"filter_{hashtag}_{region}_date"
+                ),
+            ]
+        ]
+        filter_markup = InlineKeyboardMarkup(filter_keyboard)
+        
+        sort_emoji = {
+            'likes': '❤️',
+            'views': '👁️',
+            'date': '🆕'
+        }
+        current_emoji = sort_emoji.get(sort_by, '❤️')
+        
+        await query.edit_message_text(
+            f"📤 Enviando {len(videos)} vídeos de *#{hashtag}* ({region_name})\n\n"
+            f"Ordenado por: {current_emoji}",
+            parse_mode='Markdown',
+            reply_markup=filter_markup
+        )
+        
+        # Helper function to format numbers
+        def format_number(num):
+            if num >= 1000000:
+                return f"{num/1000000:.1f}M"
+            elif num >= 1000:
+                return f"{num/1000:.1f}K"
+            return str(num)
+        
+        # Send each video
+        for i, v in enumerate(videos, 1):
+            try:
+                video_id = v['url'].split('/')[-1]
+                video_cache[video_id] = v['url']
+                
+                likes = format_number(v['digg_count'])
+                views = format_number(v['play_count'])
+                
+                title = v['title'][:100] + "..." if len(v['title']) > 100 else v['title']
+                caption = (
+                    f"🔥 *Vídeo #{i}* - #{hashtag}\n\n"
+                    f"📝 {title}\n\n"
+                    f"👤 {v['author']}\n"
+                    f"❤️ {likes} curtidas\n"
+                    f"👁️ {views} visualizações\n\n"
+                    f"🔗 [Ver no TikTok]({v['url']})"
+                )
+                
+                keyboard = [[InlineKeyboardButton("📥 Baixar Vídeo", callback_data=f"download_{video_id}")]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                if v.get('cover'):
+                    try:
+                        await context.bot.send_photo(
+                            chat_id=query.message.chat_id,
+                            photo=v['cover'],
+                            caption=caption,
+                            parse_mode='Markdown',
+                            reply_markup=reply_markup
+                        )
+                    except Exception:
+                        await context.bot.send_message(
+                            chat_id=query.message.chat_id,
+                            text=caption,
+                            parse_mode='Markdown',
+                            reply_markup=reply_markup,
+                            disable_web_page_preview=False
+                        )
+                else:
+                    await context.bot.send_message(
+                        chat_id=query.message.chat_id,
+                        text=caption,
+                        parse_mode='Markdown',
+                        reply_markup=reply_markup,
+                        disable_web_page_preview=False
+                    )
+                
+                await asyncio.sleep(0.2)
+                
+            except Exception as e:
+                logger.error(f"Error sending video {i}: {e}")
+                continue
+        
+    except Exception as e:
+        logger.error(f"Error in viral_filter_callback: {e}")
+        await query.edit_message_text(
+            f"❌ Erro ao reordenar vídeos de #{hashtag}",
+            parse_mode='Markdown'
+        )
+
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles incoming text messages containing URLs."""
     url = update.message.text.strip()
@@ -355,15 +684,19 @@ def main():
     viral_handler = CommandHandler('viral', viral)
     msg_handler = MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message)
     
+    
     # Callback handlers for buttons
     viral_callback_handler = CallbackQueryHandler(viral_callback, pattern='^viral_')
     download_callback_handler = CallbackQueryHandler(download_callback, pattern='^download_')
+    filter_callback_handler = CallbackQueryHandler(viral_filter_callback, pattern='^filter_')
 
     application.add_handler(start_handler)
     application.add_handler(viral_handler)
     application.add_handler(viral_callback_handler)
+    application.add_handler(filter_callback_handler)
     application.add_handler(download_callback_handler)
     application.add_handler(msg_handler)
+
 
     # Start dummy web server for Render
     from threading import Thread

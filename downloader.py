@@ -326,7 +326,97 @@ def _download_from_direct_url(video_url: str, platform: str) -> str:
         raise DownloadError(f"Erro ao baixar do URL direto: {str(e)}")
 
 
+
+
+def search_tiktok_by_hashtag(hashtag: str, limit: int = 15, region: str = 'US', sort_by: str = 'likes') -> list:
+    """
+    Searches TikTok videos by hashtag.
+    
+    Args:
+        hashtag: Hashtag to search for (with or without #)
+        limit: Number of videos to return
+        region: Region code (e.g. 'BR', 'US'). Defaults to 'US' (Global/International).
+        sort_by: Sort criteria - 'likes', 'views', or 'date'
+        
+    Returns:
+        list: List of dictionaries with video info
+    """
+    import requests
+    from datetime import datetime
+    
+    # Clean hashtag (remove # if present)
+    hashtag = hashtag.strip().lstrip('#')
+    
+    logger.info(f"Searching TikTok for #{hashtag} (limit={limit}, region={region}, sort={sort_by})")
+    
+    try:
+        # TikWM Search API
+        api_url = "https://www.tikwm.com/api/feed/search"
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        }
+        
+        # Request more videos to allow for filtering
+        params = {
+            'keywords': f'#{hashtag}',
+            'count': 100,  # Request more to ensure we have enough after filtering
+            'region': region
+        }
+        
+        response = requests.post(api_url, headers=headers, data=params, timeout=30)
+        
+        if response.status_code != 200:
+            logger.error(f"TikWM API error: {response.status_code}")
+            return []
+            
+        result = response.json()
+        if result.get('code') != 0:
+            logger.error(f"TikWM API returned error code: {result.get('msg')}")
+            return []
+            
+        videos = result.get('data', {}).get('videos', [])
+        
+        if not videos:
+            logger.warning(f"No videos found for #{hashtag}")
+            return []
+        
+        # Process video data
+        processed_videos = []
+        for v in videos:
+            video_data = {
+                'title': v.get('title', 'Sem título'),
+                'play_count': v.get('play_count', 0),
+                'digg_count': v.get('digg_count', 0),
+                'author': v.get('author', {}).get('nickname', 'Desconhecido'),
+                'url': f"https://www.tiktok.com/@{v.get('author', {}).get('unique_id', 'user')}/video/{v.get('video_id')}",
+                'cover': v.get('cover', ''),
+                'create_time': v.get('create_time', 0)
+            }
+            processed_videos.append(video_data)
+        
+        # Sort based on criteria
+        if sort_by == 'likes':
+            processed_videos.sort(key=lambda x: x['digg_count'], reverse=True)
+        elif sort_by == 'views':
+            processed_videos.sort(key=lambda x: x['play_count'], reverse=True)
+        elif sort_by == 'date':
+            processed_videos.sort(key=lambda x: x['create_time'], reverse=True)
+        else:
+            # Default to likes
+            processed_videos.sort(key=lambda x: x['digg_count'], reverse=True)
+        
+        logger.info(f"Found {len(processed_videos)} videos for #{hashtag}")
+        return processed_videos[:limit]
+        
+    except Exception as e:
+        logger.error(f"Error searching for #{hashtag}: {e}")
+        return []
+
+
 def get_tiktok_trending(limit: int = 15, days: int = 5, region: str = 'US') -> list:
+
     """
     Fetches trending TikTok videos.
     Filters by last N days and returns top N videos.
